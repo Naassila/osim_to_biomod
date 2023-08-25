@@ -543,6 +543,7 @@ class WriteBiomod:
             except:
                 body_dof = name + f"_rotation_{i}"
                 rot_dof = ""
+                q_range = None
 
             frame_offset.set_rotation_matrix(axis_basis[i].dot(initial_rotation))
             count_dof_rot += 1
@@ -603,7 +604,7 @@ class WriteBiomod:
 
                 # Rotations
             if len(rotations) != 0:
-                if is_ortho_basis(rotations):
+                if is_ortho_basis(rotations) and q_ranges_rot.count(None)==0:
                     rot_axis = ""
                     for idx in np.where(is_dof_rot != None)[0]:
                         rot_axis += dof_axis[idx]
@@ -691,6 +692,7 @@ class Converter:
         self,
         biomod_path,
         osim_path,
+        skip_muscle=False,
         muscle_type=None,
         state_type=None,
         print_warnings=True,
@@ -718,21 +720,23 @@ class Converter:
         self.muscle_type = muscle_type if muscle_type else "hilldegroote"
         self.state_type = state_type
         self.mesh_dir = mesh_dir
+        self.skip_muscle = skip_muscle
 
-        if isinstance(self.muscle_type, MuscleType):
-            self.muscle_type = self.muscle_type.value
-        if isinstance(self.state_type, MuscleStateType):
-            self.state_type = self.state_type.value
+        if not skip_muscle:
+            if isinstance(self.muscle_type, MuscleType):
+                self.muscle_type = self.muscle_type.value
+            if isinstance(self.state_type, MuscleStateType):
+                self.state_type = self.state_type.value
 
-        if isinstance(muscle_type, str):
-            if self.muscle_type not in [e.value for e in MuscleType]:
-                raise RuntimeError(f"Muscle of type {self.muscle_type} is not a biorbd muscle.")
+            if isinstance(muscle_type, str):
+                if self.muscle_type not in [e.value for e in MuscleType]:
+                    raise RuntimeError(f"Muscle of type {self.muscle_type} is not a biorbd muscle.")
 
-        if isinstance(muscle_type, str):
-            if self.state_type not in [e.value for e in MuscleStateType]:
-                raise RuntimeError(f"Muscle state type {self.state_type} is not a biorbd muscle state type.")
-        if self.state_type == "default":
-            self.state_type = None
+            if isinstance(muscle_type, str):
+                if self.state_type not in [e.value for e in MuscleStateType]:
+                    raise RuntimeError(f"Muscle state type {self.state_type} is not a biorbd muscle state type.")
+            if self.state_type == "default":
+                self.state_type = None
 
     def convert_file(self):
         # headers
@@ -764,33 +768,34 @@ class Converter:
                     for marker in body.markers:
                         self.writer.write_marker(marker)
 
-        muscle_groups = []
-        for muscle in self.forces:
-            group = muscle.group
-            if group not in muscle_groups:
-                muscle_groups.append(group)
+        if not self.skip_muscle:
+            muscle_groups = []
+            for muscle in self.forces:
+                group = muscle.group
+                if group not in muscle_groups:
+                    muscle_groups.append(group)
 
-        self.writer.write("\n// MUSCLE DEFINIION\n")
-        muscles = self.forces
-        while len(muscles) != 0:
-            for muscle_group in muscle_groups:
-                idx = []
-                self.writer.write_muscle_group(muscle_group)
-                for m, muscle in enumerate(muscles):
-                    if muscle.group == muscle_group:
-                        if not muscle.applied:
-                            self.writer.write("\n/*")
-                        self.writer.write_muscle(muscle, self.muscle_type, self.state_type)
-                        for via_point in muscle.via_point:
-                            self.writer.write_via_point(via_point)
-                        if not muscle.applied:
-                            self.writer.write("*/\n")
-                        idx.append(m)
-                count = 0
-                for i in idx:
-                    muscles.pop(i - count)
-                    count += 1
-            muscle_groups.pop(0)
+            self.writer.write("\n// MUSCLE DEFINIION\n")
+            muscles = self.forces
+            while len(muscles) != 0:
+                for muscle_group in muscle_groups:
+                    idx = []
+                    self.writer.write_muscle_group(muscle_group)
+                    for m, muscle in enumerate(muscles):
+                        if muscle.group == muscle_group:
+                            if not muscle.applied:
+                                self.writer.write("\n/*")
+                            self.writer.write_muscle(muscle, self.muscle_type, self.state_type)
+                            for via_point in muscle.via_point:
+                                self.writer.write_via_point(via_point)
+                            if not muscle.applied:
+                                self.writer.write("*/\n")
+                            idx.append(m)
+                    count = 0
+                    for i in idx:
+                        muscles.pop(i - count)
+                        count += 1
+                muscle_groups.pop(0)
 
         if self.print_warnings:
             self.writer.write("\n/*-------------- WARNINGS---------------\n")
